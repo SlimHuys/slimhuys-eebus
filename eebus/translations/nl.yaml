@@ -1,0 +1,36 @@
+configuration:
+  device_ski:
+    name: SKI van het apparaat
+    description: >-
+      SKI van het EEBUS-apparaat (40 hex-tekens). Laat leeg om het enige
+      EEBUS-apparaat op het netwerk te gebruiken. De add-on-log toont elk
+      gevonden apparaat.
+  mqtt_host:
+    name: MQTT-host
+    description: >-
+      Leeg laten om de Mosquitto-add-on te gebruiken. Invullen voor een
+      externe broker.
+  mqtt_port:
+    name: MQTT-poort
+  mqtt_username:
+    name: MQTT-gebruikersnaam
+  mqtt_password:
+    name: MQTT-wachtwoord
+  poll_interval:
+    name: Poll-interval (seconden)
+    description: >-
+      Het apparaat stuurt wijzigingen zelf door; pollen is een extra vangnet.
+  stale_after:
+    name: Verouderd na (seconden)
+    description: >-
+      Een waarde die zo lang niet ververst is, wordt onbeschikbaar in plaats
+      van stil een oud getal te tonen. Minimaal twee poll-intervallen.
+  port:
+    name: EEBUS-poort
+    description: TCP-poort voor inkomende EEBUS-verbindingen (SHIP).
+  discovery_prefix:
+    name: MQTT discovery-prefix
+  topic_prefix:
+    name: MQTT topic-prefix
+  debug:
+    name: Debug-logging

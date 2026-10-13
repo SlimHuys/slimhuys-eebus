@@ -1,0 +1,35 @@
+configuration:
+  device_ski:
+    name: Device SKI
+    description: >-
+      SKI of the EEBUS device (40 hex characters). Leave empty to use the only
+      EEBUS device found on the network. The add-on log lists every device it
+      finds.
+  mqtt_host:
+    name: MQTT host
+    description: >-
+      Leave empty to use the Mosquitto add-on. Fill in for an external broker.
+  mqtt_port:
+    name: MQTT port
+  mqtt_username:
+    name: MQTT username
+  mqtt_password:
+    name: MQTT password
+  poll_interval:
+    name: Poll interval (seconds)
+    description: >-
+      The device pushes changes by itself; polling is a safety net on top.
+  stale_after:
+    name: Stale after (seconds)
+    description: >-
+      A value that has not been refreshed for this long becomes unavailable
+      instead of silently showing an old number. At least two poll intervals.
+  port:
+    name: EEBUS port
+    description: TCP port for incoming EEBUS (SHIP) connections.
+  discovery_prefix:
+    name: MQTT discovery prefix
+  topic_prefix:
+    name: MQTT topic prefix
+  debug:
+    name: Debug logging
