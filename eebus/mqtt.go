@@ -194,8 +194,6 @@ func NewPublisher(cfg Config, device DeviceInfo) *Publisher {
 		SetPassword(cfg.MQTTPassword).
 		SetWill(p.topics.bridgeStatus(), "offline", 1, true).
 		SetAutoReconnect(true).
-		SetConnectRetry(true).
-		SetConnectRetryInterval(10 * time.Second).
 		SetOnConnectHandler(p.onConnect).
 		SetConnectionLostHandler(func(_ paho.Client, err error) {
 			log.Printf("MQTT connection lost: %v", err)
@@ -204,8 +202,21 @@ func NewPublisher(cfg Config, device DeviceInfo) *Publisher {
 	return p
 }
 
-func (p *Publisher) Connect() {
-	p.client.Connect()
+// Connect keeps trying until the broker accepts us. paho's own connect
+// retry is silent, which hides a wrong host or password; this loop logs why.
+func (p *Publisher) Connect(broker string) {
+	go func() {
+		for attempt := 1; ; attempt++ {
+			tok := p.client.Connect()
+			tok.Wait()
+			if err := tok.Error(); err == nil {
+				return
+			} else if attempt == 1 || attempt%30 == 0 {
+				log.Printf("MQTT: cannot connect to %s: %v (retrying every 10s)", broker, err)
+			}
+			time.Sleep(10 * time.Second)
+		}
+	}()
 }
 
 func (p *Publisher) Close() {

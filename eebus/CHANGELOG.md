@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.1.1
+
+- Log the MQTT broker at startup and why connecting fails (wrong host,
+  credentials); before, the add-on retried silently.
+- Log an untrusted/rejected EEBUS connection once every five minutes instead
+  of on every retry.
+
 ## 0.1.0
 
 - First release: read-only. Every SPINE measurement of the device becomes an

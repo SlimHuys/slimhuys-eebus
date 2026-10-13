@@ -97,7 +97,9 @@ func (b *Bridge) useSKI(ski string) {
 	b.mu.Unlock()
 
 	log.Printf("Using EEBUS device %s (%s)", ski, b.device.displayName())
-	pub.Connect()
+	broker := fmt.Sprintf("%s:%d", b.cfg.MQTTHost, b.cfg.MQTTPort)
+	log.Printf("MQTT broker: %s (user %q)", broker, b.cfg.MQTTUsername)
+	pub.Connect(broker)
 	b.svc.RegisterRemoteSKI(ski)
 }
 
