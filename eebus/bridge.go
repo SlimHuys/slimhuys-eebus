@@ -54,6 +54,7 @@ type Bridge struct {
 	lpc           *eglpc.LPC
 	lpcState      LPCState
 	lpcChecked    bool
+	lpcLimitSet   bool // the limit value was set from Home Assistant in this run
 	// counters for the hourly "still alive" log line
 	statValues, statPushed int
 	statSince              time.Time

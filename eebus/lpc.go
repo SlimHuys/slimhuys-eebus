@@ -87,15 +87,23 @@ func (b *Bridge) refreshLPC() {
 		b.publishLPC(st)
 		return
 	}
-	st.Supported = true
-	if l, err := b.lpc.ConsumptionLimit(e); err == nil {
-		st.Limit, st.Active = l.Value, l.IsActive
+	// The device announces LPC support before it sends the values. Until the
+	// limit and failsafe are actually known, keep the entities unavailable
+	// and do not act on empty data.
+	l, errLimit := b.lpc.ConsumptionLimit(e)
+	failsafe, errFailsafe := b.lpc.FailsafeConsumptionActivePowerLimit(e)
+	if errLimit != nil || errFailsafe != nil {
+		if b.cfg.Debug {
+			log.Printf("power limit data not complete yet (limit: %v, failsafe: %v)", errLimit, errFailsafe)
+		}
+		st.Supported = false
+		b.publishLPC(st)
+		return
 	}
+	st.Supported = true
+	st.Limit, st.Active, st.Failsafe = l.Value, l.IsActive, failsafe
 	if v, err := b.lpc.ConsumptionNominalMax(e); err == nil && v > 0 {
 		st.NominalMax = v
-	}
-	if v, err := b.lpc.FailsafeConsumptionActivePowerLimit(e); err == nil {
-		st.Failsafe = v
 	}
 	if d, err := b.lpc.FailsafeDurationMinimum(e); err == nil {
 		st.FailsafeDuration = d
@@ -174,6 +182,9 @@ func (b *Bridge) SetLPCLimit(value float64) {
 	st := b.lpcState
 	b.mu.Unlock()
 	value = math.Max(0, math.Min(value, b.lpcMax(st)))
+	b.mu.Lock()
+	b.lpcLimitSet = true
+	b.mu.Unlock()
 	log.Printf("Power limit set to %s W (active: %v)", formatValue(value), st.Active)
 	b.writeLPC(e, value, st.Active)
 }
@@ -187,6 +198,12 @@ func (b *Bridge) SetLPCActive(on bool) {
 	}
 	b.mu.Lock()
 	st := b.lpcState
+	if on && st.Limit < lpcLeftoverBelow && !b.lpcLimitSet {
+		b.mu.Unlock()
+		log.Printf("Not switching the power limit on: it is %s W, which would stop the heat pump, and it was not set from Home Assistant. Set the Power limit first (0 W is allowed when set on purpose).", formatValue(st.Limit))
+		b.publishLPC(st) // put the switch back to OFF in Home Assistant
+		return
+	}
 	if on && b.cfg.PowerLimitMaxMinutes > 0 {
 		b.lpcState.Expires = time.Now().Add(time.Duration(b.cfg.PowerLimitMaxMinutes) * time.Minute)
 	} else {

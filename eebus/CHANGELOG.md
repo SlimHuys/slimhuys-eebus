@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.2.1
+
+- Fix: the power limit was read the moment the device announced support,
+  before it sent any values. The startup check then acted on empty data
+  (logged as `failsafe 0 W for 0s`), its write failed with `data not
+  available`, and a leftover 0 W limit stayed in place. The limit entities now
+  stay unavailable until the device has sent real values, and the startup
+  check runs only then.
+- Safety net: the Power limit switch refuses to turn on while the limit is
+  below 500 W, unless that value was set from Home Assistant in this run.
+
 ## 0.2.0
 
 - Power limit (EEBUS LPC): a **Power limit** number and a **Power limit
