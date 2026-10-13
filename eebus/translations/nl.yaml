@@ -31,6 +31,19 @@ configuration:
       Een ingeschakelde begrenzing vervalt vanzelf na zoveel minuten, zodat
       een vergeten automatisering de warmtepomp niet blijvend afknijpt.
       0 = nooit.
+  grid_power_entity:
+    name: Entiteit netvermogen (experimenteel)
+    description: >-
+      Sensor in Home Assistant met het vermogen op je netaansluiting (W of
+      kW, positief = afname, negatief = teruglevering). Wordt aan het
+      apparaat aangeboden voor zijn eigen energiebeheer op zonne-overschot.
+      Leeg = uit.
+  grid_energy_consumed_entity:
+    name: Entiteit afgenomen energie
+    description: Optioneel totaal van de afgenomen energie (kWh).
+  grid_energy_feed_in_entity:
+    name: Entiteit teruggeleverde energie
+    description: Optioneel totaal van de teruggeleverde energie (kWh).
   port:
     name: EEBUS-poort
     description: TCP-poort voor inkomende EEBUS-verbindingen (SHIP).

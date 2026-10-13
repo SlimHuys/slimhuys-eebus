@@ -30,6 +30,18 @@ configuration:
       A power limit that is switched on ends by itself after this many
       minutes, so a forgotten automation cannot keep the heat pump throttled.
       0 = never.
+  grid_power_entity:
+    name: Grid power entity (experimental)
+    description: >-
+      Home Assistant sensor with the power at your grid connection (W or kW,
+      positive = taking from the grid, negative = feeding in). Offered to the
+      device for its own solar-surplus energy management. Empty = off.
+  grid_energy_consumed_entity:
+    name: Grid energy consumed entity
+    description: Optional total energy taken from the grid (kWh).
+  grid_energy_feed_in_entity:
+    name: Grid energy fed in entity
+    description: Optional total energy fed into the grid (kWh).
   port:
     name: EEBUS port
     description: TCP port for incoming EEBUS (SHIP) connections.

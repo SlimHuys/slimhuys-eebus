@@ -91,27 +91,41 @@ type availability struct {
 }
 
 type discoveryConfig struct {
-	Name              string          `json:"name"`
-	UniqueID          string          `json:"unique_id"`
-	StateTopic        string          `json:"state_topic"`
-	AttributesTopic   string          `json:"json_attributes_topic,omitempty"`
-	Unit              string          `json:"unit_of_measurement,omitempty"`
-	DeviceClass       string          `json:"device_class,omitempty"`
-	StateClass        string          `json:"state_class,omitempty"`
-	EntityCategory    string          `json:"entity_category,omitempty"`
-	PayloadOn         string          `json:"payload_on,omitempty"`
-	PayloadOff        string          `json:"payload_off,omitempty"`
-	CommandTopic      string          `json:"command_topic,omitempty"`
-	Min               *float64        `json:"min,omitempty"`
-	Max               *float64        `json:"max,omitempty"`
-	Step              float64         `json:"step,omitempty"`
-	Mode              string          `json:"mode,omitempty"`
-	Icon              string          `json:"icon,omitempty"`
-	Availability      []availability  `json:"availability"`
-	AvailabilityMode  string          `json:"availability_mode,omitempty"`
-	Device            discoveryDevice `json:"device"`
-	Origin            discoveryOrigin `json:"origin"`
-	SuggestedDisplayP *int            `json:"suggested_display_precision,omitempty"`
+	Name            string   `json:"name"`
+	UniqueID        string   `json:"unique_id"`
+	StateTopic      string   `json:"state_topic"`
+	AttributesTopic string   `json:"json_attributes_topic,omitempty"`
+	Unit            string   `json:"unit_of_measurement,omitempty"`
+	DeviceClass     string   `json:"device_class,omitempty"`
+	StateClass      string   `json:"state_class,omitempty"`
+	EntityCategory  string   `json:"entity_category,omitempty"`
+	PayloadOn       string   `json:"payload_on,omitempty"`
+	PayloadOff      string   `json:"payload_off,omitempty"`
+	CommandTopic    string   `json:"command_topic,omitempty"`
+	Min             *float64 `json:"min,omitempty"`
+	Max             *float64 `json:"max,omitempty"`
+	Step            float64  `json:"step,omitempty"`
+	Mode            string   `json:"mode,omitempty"`
+	Icon            string   `json:"icon,omitempty"`
+	Options         []string `json:"options,omitempty"`
+
+	// climate
+	Modes                   []string        `json:"modes,omitempty"`
+	ModeStateTopic          string          `json:"mode_state_topic,omitempty"`
+	ModeCommandTopic        string          `json:"mode_command_topic,omitempty"`
+	TemperatureStateTopic   string          `json:"temperature_state_topic,omitempty"`
+	TemperatureCommandTopic string          `json:"temperature_command_topic,omitempty"`
+	CurrentTemperatureTopic string          `json:"current_temperature_topic,omitempty"`
+	MinTemp                 *float64        `json:"min_temp,omitempty"`
+	MaxTemp                 *float64        `json:"max_temp,omitempty"`
+	TempStep                float64         `json:"temp_step,omitempty"`
+	TemperatureUnit         string          `json:"temperature_unit,omitempty"`
+	Precision               float64         `json:"precision,omitempty"`
+	Availability            []availability  `json:"availability"`
+	AvailabilityMode        string          `json:"availability_mode,omitempty"`
+	Device                  discoveryDevice `json:"device"`
+	Origin                  discoveryOrigin `json:"origin"`
+	SuggestedDisplayP       *int            `json:"suggested_display_precision,omitempty"`
 }
 
 func origin() discoveryOrigin {
@@ -225,6 +239,11 @@ func lpcConfigs(t Topics, d DeviceInfo, max float64) map[string]discoveryConfig 
 type CommandHandler interface {
 	SetLPCLimit(value float64)
 	SetLPCActive(on bool)
+	SetDHWMode(mode string)
+	SetDHWBoost(on bool)
+	SetDHWSetpoint(value float64)
+	SetRoomMode(mode string)
+	SetRoomSetpoint(value float64)
 }
 
 // Publisher is the MQTT side of the bridge.
@@ -244,15 +263,23 @@ type Publisher struct {
 	lpc          *LPCState
 	lpcMax       float64
 	lpcAnnounced bool
+
+	dhw        *DHWState
+	room       *RoomState
+	opState    string
+	announced  map[string]string // discovery topic -> last payload
+	components map[string]string // entity key -> component
 }
 
 func NewPublisher(cfg Config, device DeviceInfo, handler CommandHandler) *Publisher {
 	p := &Publisher{
-		handler: handler,
-		topics:  Topics{discovery: cfg.DiscoveryPrefix, prefix: cfg.TopicPrefix, ski8: device.shortSKI()},
-		device:  device,
-		known:   map[string]*Measurement{},
-		fresh:   map[string]bool{},
+		handler:    handler,
+		announced:  map[string]string{},
+		components: map[string]string{},
+		topics:     Topics{discovery: cfg.DiscoveryPrefix, prefix: cfg.TopicPrefix, ski8: device.shortSKI()},
+		device:     device,
+		known:      map[string]*Measurement{},
+		fresh:      map[string]bool{},
 	}
 
 	opts := paho.NewClientOptions().
@@ -309,6 +336,7 @@ func (p *Publisher) onConnect(c paho.Client) {
 			}
 			p.handler.SetLPCLimit(v)
 		})
+		p.subscribeHVAC(c)
 		c.Subscribe(p.topics.lpcActiveSet(), 1, func(_ paho.Client, msg paho.Message) {
 			switch strings.ToUpper(strings.TrimSpace(string(msg.Payload()))) {
 			case "ON":
@@ -363,6 +391,9 @@ func (p *Publisher) republishAll() {
 	}
 	p.lpcAnnounced = false
 	p.lpcLocked()
+	p.announced = map[string]string{}
+	p.hvacLocked()
+	p.opStateLocked()
 }
 
 // LPC publishes the power limit state.

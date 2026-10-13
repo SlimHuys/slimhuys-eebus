@@ -1,5 +1,5 @@
 name: SlimHuys EEBUS
-version: "0.2.1"
+version: "0.3.0"
 slug: slimhuys_eebus
 description: Local EEBUS bridge for heat pumps (Vaillant VR940/VR921) to Home Assistant via MQTT
 url: https://github.com/SlimHuys/slimhuys-eebus
@@ -11,6 +11,8 @@ startup: services
 boot: auto
 # EEBUS needs mDNS discovery and an inbound TLS port on the LAN.
 host_network: true
+# Grid data for the device is read from Home Assistant entities.
+homeassistant_api: true
 services:
   - mqtt:want
 options:
@@ -22,6 +24,9 @@ options:
   poll_interval: 300
   stale_after: 720
   power_limit_max_minutes: 240
+  grid_power_entity: ""
+  grid_energy_consumed_entity: ""
+  grid_energy_feed_in_entity: ""
   port: 4713
   discovery_prefix: homeassistant
   topic_prefix: slimhuys_eebus
@@ -35,6 +40,9 @@ schema:
   poll_interval: int(30,3600)
   stale_after: int(60,7200)
   power_limit_max_minutes: int(0,1440)
+  grid_power_entity: str?
+  grid_energy_consumed_entity: str?
+  grid_energy_feed_in_entity: str?
   port: port
   discovery_prefix: str
   topic_prefix: str

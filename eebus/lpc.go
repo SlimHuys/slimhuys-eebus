@@ -156,7 +156,7 @@ func (b *Bridge) publishLPC(st LPCState) {
 
 func (b *Bridge) writeLPC(e spineapi.EntityRemoteInterface, value float64, active bool) {
 	limit := ucapi.LoadLimit{Value: value, IsActive: active}
-	_, err := b.lpc.WriteConsumptionLimit(e, limit, func(res model.ResultDataType) {
+	_, err := b.lpc.WriteConsumptionLimit(e, limit, func(res model.ResultDataType, _ model.MsgCounterType) {
 		if res.ErrorNumber != nil && *res.ErrorNumber != model.ErrorNumberTypeNoError {
 			desc := ""
 			if res.Description != nil {

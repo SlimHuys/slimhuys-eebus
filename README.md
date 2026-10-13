@@ -13,9 +13,11 @@ EEBUS, which the myVAILLANT cloud does not offer. This add-on reads those
 values and keeps them honest: every sensor turns *unavailable* when it is not
 refreshed, instead of freezing on an old value.
 
-Built on [enbility/eebus-go](https://github.com/enbility/eebus-go). The
-VR940 research in [volschin/eebus-ha-bridge](https://github.com/volschin/eebus-ha-bridge)
-was a great help.
+Built on [enbility/eebus-go](https://github.com/enbility/eebus-go), through
+the [volschin/eebus-go](https://github.com/volschin/eebus-go) fork that adds
+the hot water and heating use cases. The VR940 research in
+[volschin/eebus-ha-bridge](https://github.com/volschin/eebus-ha-bridge) was a
+great help.
 
 ## Status
 
@@ -23,8 +25,9 @@ was a great help.
 |---|---|
 | Read power and temperatures | ✅ 0.1.0 |
 | Power limit (LPC) | 🧪 0.2.0, being tested |
-| Hot water boost | planned |
-| Setpoints and operating modes | planned |
+| Hot water mode, setpoint, boost | 🧪 0.3.0, being tested |
+| Heating mode and room setpoint (climate) | 🧪 0.3.0, being tested |
+| Grid data for Vaillant energy management (MGCP) | 🧪 0.3.0, experimental |
 
 Tested with: Vaillant aroTHERM plus + VR940. Reports for other devices are
 welcome as an issue (include the add-on log with `debug: true`).

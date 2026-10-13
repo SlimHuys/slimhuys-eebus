@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.3.0
+
+- **Hot water**: mode (select), setpoint (number) and one-time boost
+  (switch), plus a boost status sensor. Anything the device only offers
+  read-only shows up as a plain sensor instead of a control that does
+  nothing.
+- **Heating**: a climate entity (auto / heat / off and the room setpoint),
+  with the EEBUS room temperature as current temperature.
+- **Operating state** of the device as a diagnostic sensor.
+- **Grid data (experimental)**: with `grid_power_entity` set, the add-on
+  offers your grid meter to the device (EEBUS MGCP) for Vaillant's own
+  solar-surplus energy management. Requires the "Energy management" sliders
+  in the myVAILLANT app; whether the VR940 acts on it is not confirmed yet.
+- Now built on the eebus-go fork by volschin, which adds the hot water and
+  heating use cases (MDSF, CDSF, MRHSF, CRHSF, CRHT, MGCP). The hot water
+  setpoint write follows the approach volschin/eebus-ha-bridge validated on
+  the VR940.
+
 ## 0.2.1
 
 - Fix: the power limit was read the moment the device announced support,

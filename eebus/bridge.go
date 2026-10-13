@@ -41,28 +41,32 @@ type Bridge struct {
 	svc   *service.Service
 	local spineapi.EntityLocalInterface
 
-	mu            sync.Mutex
-	ski           string
-	device        DeviceInfo
-	pub           *Publisher
-	connected     bool
-	connectedAt   time.Time
-	lastData      time.Time
-	lastPoll      time.Time
-	reconnects    int
-	lastRejectLog time.Time
-	lpc           *eglpc.LPC
-	lpcState      LPCState
-	lpcChecked    bool
-	lpcLimitSet   bool // the limit value was set from Home Assistant in this run
+	mu             sync.Mutex
+	ski            string
+	device         DeviceInfo
+	pub            *Publisher
+	connected      bool
+	connectedAt    time.Time
+	lastData       time.Time
+	lastPoll       time.Time
+	reconnects     int
+	lastRejectLog  time.Time
+	lpc            *eglpc.LPC
+	lpcState       LPCState
+	lpcChecked     bool
+	lpcLimitSet    bool // the limit value was set from Home Assistant in this run
+	hvac           *hvac
+	hvacLogged     bool
+	operatingState string
+	grid           *grid
 	// counters for the hourly "still alive" log line
 	statValues, statPushed int
 	statSince              time.Time
-	descs                  map[string]Description           // "<address>/<id>"
-	pending                map[string]pendingValue          // values that arrived before their description
-	measures               map[string]*Measurement          // "<address>/<id>"
-	descAsked              map[string]time.Time             // "<address>" -> last description request
-	candidates             map[string]shipapi.RemoteService // discovered devices, by SKI
+	descs                  map[string]Description               // "<address>/<id>"
+	pending                map[string]pendingValue              // values that arrived before their description
+	measures               map[string]*Measurement              // "<address>/<id>"
+	descAsked              map[string]time.Time                 // "<address>" -> last description request
+	candidates             map[string]shipapi.RemoteMdnsService // discovered devices, by SKI
 }
 
 func NewBridge(cfg Config) *Bridge {
@@ -74,7 +78,7 @@ func NewBridge(cfg Config) *Bridge {
 		pending:    map[string]pendingValue{},
 		measures:   map[string]*Measurement{},
 		descAsked:  map[string]time.Time{},
-		candidates: map[string]shipapi.RemoteService{},
+		candidates: map[string]shipapi.RemoteMdnsService{},
 	}
 }
 
@@ -109,7 +113,7 @@ func (b *Bridge) useSKI(ski string) {
 	broker := fmt.Sprintf("%s:%d", b.cfg.MQTTHost, b.cfg.MQTTPort)
 	log.Printf("MQTT broker: %s (user %q)", broker, b.cfg.MQTTUsername)
 	pub.Connect(broker)
-	b.svc.RegisterRemoteSKI(ski)
+	b.svc.RegisterRemoteService(b.identity())
 }
 
 func (b *Bridge) publisher() *Publisher {
@@ -141,6 +145,8 @@ func (b *Bridge) HandleEvent(ev spineapi.EventPayload) {
 		b.onDescriptions(ev.Entity, d)
 	case *model.MeasurementListDataType:
 		b.onValues(ev.Entity, d, source)
+	case *model.DeviceDiagnosisStateDataType:
+		b.onDiagnosis(d)
 	}
 }
 
@@ -267,6 +273,7 @@ func (b *Bridge) poll() {
 		return
 	}
 	for _, e := range dev.Entities() {
+		b.requestOperatingState(e)
 		if e.FeatureOfTypeAndRole(model.FeatureTypeTypeMeasurement, model.RoleTypeServer) == nil {
 			continue
 		}
@@ -284,6 +291,13 @@ func (b *Bridge) poll() {
 			log.Printf("request %s: %v", e.EntityType(), err)
 		}
 	}
+	// Safety net for devices that do not push setpoint changes.
+	if b.hvac != nil {
+		if e := b.entityFor(b.hvac.dhwSP); e != nil {
+			b.hvac.dhwSP.connect(e) // subscribes if needed, then requests the data
+		}
+		b.refreshHVAC()
+	}
 }
 
 func (b *Bridge) loop() {
@@ -298,7 +312,6 @@ func (b *Bridge) loop() {
 		if !gotData {
 			staleFor = now.Sub(b.connectedAt)
 		}
-		ski := b.ski
 		pub := b.pub
 		var stats string
 		if b.statSince.IsZero() {
@@ -337,14 +350,15 @@ func (b *Bridge) loop() {
 				os.Exit(1)
 			}
 			log.Printf("No data for %s, reconnecting (attempt %d/%d)", staleFor.Round(time.Second), n, maxReconnects)
-			b.svc.DisconnectSKI(ski, "stale data")
+			b.svc.DisconnectService(b.identity(), "stale data")
 		}
 	}
 }
 
 // ---- api.ServiceReaderInterface ----
 
-func (b *Bridge) RemoteSKIConnected(_ api.ServiceInterface, ski string) {
+func (b *Bridge) RemoteServiceConnected(_ api.ServiceInterface, id shipapi.ServiceIdentity) {
+	ski := id.SKI
 	if normalizeSKI(ski) != b.currentSKI() {
 		return
 	}
@@ -361,7 +375,8 @@ func (b *Bridge) RemoteSKIConnected(_ api.ServiceInterface, ski string) {
 	}
 }
 
-func (b *Bridge) RemoteSKIDisconnected(_ api.ServiceInterface, ski string) {
+func (b *Bridge) RemoteServiceDisconnected(_ api.ServiceInterface, id shipapi.ServiceIdentity) {
+	ski := id.SKI
 	if normalizeSKI(ski) != b.currentSKI() {
 		return
 	}
@@ -384,7 +399,7 @@ func (b *Bridge) currentSKI() string {
 	return b.ski
 }
 
-func (b *Bridge) VisibleRemoteServicesUpdated(_ api.ServiceInterface, entries []shipapi.RemoteService) {
+func (b *Bridge) VisibleRemoteMdnsServicesUpdated(_ api.ServiceInterface, entries []shipapi.RemoteMdnsService) {
 	b.mu.Lock()
 	for _, e := range entries {
 		ski := normalizeSKI(e.Ski)
@@ -412,9 +427,9 @@ func (b *Bridge) VisibleRemoteServicesUpdated(_ api.ServiceInterface, entries []
 
 	// No device_ski configured: only pick a device when the choice is
 	// unambiguous. Energy managers (other bridges, evcc, ...) are skipped.
-	var picks []shipapi.RemoteService
+	var picks []shipapi.RemoteMdnsService
 	for _, e := range entries {
-		if e.Type == string(model.DeviceTypeTypeEnergyManagementSystem) {
+		if isEnergyManager(e) {
 			continue
 		}
 		picks = append(picks, e)
@@ -428,9 +443,39 @@ func (b *Bridge) VisibleRemoteServicesUpdated(_ api.ServiceInterface, entries []
 	}
 }
 
-func (b *Bridge) ServiceShipIDUpdate(string, string) {}
+func (b *Bridge) ServiceUpdated(shipapi.ServiceIdentity) {}
 
-func (b *Bridge) ServicePairingDetailUpdate(ski string, d *shipapi.ConnectionStateDetail) {
+func (b *Bridge) ServiceAutoTrusted(api.ServiceInterface, shipapi.ServiceIdentity) {}
+
+func (b *Bridge) ServiceAutoTrustFailed(api.ServiceInterface, shipapi.ServiceIdentity, error) {}
+
+func (b *Bridge) ServiceAutoTrustRemoved(api.ServiceInterface, shipapi.ServiceIdentity, string) {}
+
+// identity is the SHIP identity of the device we talk to.
+func (b *Bridge) identity() shipapi.ServiceIdentity {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	shipID := ""
+	if c, ok := b.candidates[b.ski]; ok {
+		shipID = c.ShipID
+	}
+	return shipapi.NewServiceIdentity(b.ski, "", shipID)
+}
+
+func isEnergyManager(s shipapi.RemoteMdnsService) bool {
+	if s.Type == string(model.DeviceTypeTypeEnergyManagementSystem) {
+		return true
+	}
+	for _, c := range s.Categories {
+		if c == shipapi.DeviceCategoryTypeEnergyManagementSystem {
+			return true
+		}
+	}
+	return false
+}
+
+func (b *Bridge) ServicePairingDetailUpdate(id shipapi.ServiceIdentity, d *shipapi.ConnectionStateDetail) {
+	ski := id.SKI
 	if normalizeSKI(ski) != b.currentSKI() {
 		return
 	}
@@ -454,8 +499,4 @@ func (b *Bridge) ServicePairingDetailUpdate(ski string, d *shipapi.ConnectionSta
 			log.Printf("connection error with %s: %v", ski, d.Error())
 		}
 	}
-}
-
-func (b *Bridge) AllowWaitingForTrust(ski string) bool {
-	return normalizeSKI(ski) == b.currentSKI()
 }

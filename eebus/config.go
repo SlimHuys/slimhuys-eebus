@@ -32,6 +32,13 @@ type Config struct {
 	// 0 = never. Protects against a forgotten automation.
 	PowerLimitMaxMinutes int `json:"power_limit_max_minutes"`
 
+	// Grid connection point data offered to the device (EEBUS MGCP), read
+	// from Home Assistant. Power in W, positive = taking from the grid,
+	// negative = feeding in. Energy counters in kWh are optional.
+	GridPowerEntity          string `json:"grid_power_entity"`
+	GridEnergyConsumedEntity string `json:"grid_energy_consumed_entity"`
+	GridEnergyFeedInEntity   string `json:"grid_energy_feed_in_entity"`
+
 	DataDir string `json:"-"`
 }
 

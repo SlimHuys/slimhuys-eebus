@@ -33,6 +33,8 @@ bridges (or evcc's EEBUS connection) before you start this one.
 | `poll_interval` | 300 | Seconds between polls. The device pushes changes itself; polling is a safety net. |
 | `stale_after` | 720 | A value not refreshed for this long becomes *unavailable*. Minimum: two poll intervals. |
 | `power_limit_max_minutes` | 240 | A switched-on power limit ends by itself after this many minutes. 0 = never. |
+| `grid_power_entity` | empty | Experimental: HA sensor with your grid power, offered to the device. |
+| `grid_energy_consumed_entity` / `grid_energy_feed_in_entity` | empty | Optional grid energy totals (kWh). |
 | `port` | 4713 | TCP port for incoming EEBUS connections. |
 | `debug` | false | Log every received value. |
 
@@ -94,6 +96,51 @@ automation:
       - action: "switch.turn_{{ 'on' if trigger.to_state.state == 'on' else 'off' }}"
         target: {entity_id: switch.vaillant_vr940_power_limit_active}
 ```
+
+## Hot water and heating
+
+| Entity | |
+|---|---|
+| Hot water mode (select) | auto / on / off, as offered by the device |
+| Hot water setpoint (number, °C) | Range and step come from the device |
+| Hot water boost (switch) | Charge the cylinder once, now |
+| Hot water boost status (diagnostic) | inactive / active / running / finished |
+| Heating (climate) | auto / heat / off and the room setpoint; current temperature from the room sensor |
+| Operating state (diagnostic) | e.g. `normalOperation`, `failure` |
+
+The same settings exist in the myVAILLANT app and integration; this add-on
+changes them locally and without delay. Changes made elsewhere show up here
+too, because every entity shows what the device reports.
+
+Not available over EEBUS on the VR940: cooling, time programs, and what the
+heat pump is doing right now (heating, hot water or defrosting).
+
+Example: charge the hot water cylinder once when electricity is cheap.
+
+```yaml
+automation:
+  - alias: Hot water boost on cheap power
+    triggers:
+      - trigger: state
+        entity_id: sensor.electricity_price_level
+        to: very_low
+    actions:
+      - action: switch.turn_on
+        target: {entity_id: switch.vaillant_vr940_hot_water_boost}
+```
+
+## Grid data (experimental)
+
+Vaillant heat pumps can charge the hot water and buffer cylinders with solar
+surplus when an energy manager tells them the grid power. Set
+`grid_power_entity` to your grid meter's power sensor (positive = taking from
+the grid, negative = feeding in) and the add-on offers it every 5 seconds.
+The diagnostic sensor *Grid power sent to device* shows what was sent.
+
+In the myVAILLANT app, trust this add-on under Network → EEBUS and switch on
+**Settings → Controller → Energy management** for heating and hot water.
+Whether the VR940 actually uses the data is not confirmed yet; reports are
+welcome.
 
 ## Never silently stale
 

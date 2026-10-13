@@ -19,12 +19,23 @@ import (
 	"github.com/enbility/eebus-go/api"
 	"github.com/enbility/eebus-go/service"
 	"github.com/enbility/eebus-go/usecases/ma/mpc"
+	shipapi "github.com/enbility/ship-go/api"
 	"github.com/enbility/ship-go/cert"
 	"github.com/enbility/spine-go/model"
-	"github.com/enbility/spine-go/spine"
 )
 
 var version = "dev"
+
+// entityTypes lists the local SPINE entities. The grid connection point is
+// only added when grid data is configured, so by default the bridge
+// advertises just the energy manager (CEM).
+func entityTypes(cfg Config) []model.EntityTypeType {
+	types := []model.EntityTypeType{model.EntityTypeTypeCEM}
+	if cfg.GridPowerEntity != "" {
+		types = append(types, model.EntityTypeTypeGridConnectionPointOfPremises)
+	}
+	return types
+}
 
 // loadOrCreateCert keeps the certificate in the data dir: the SKI derived
 // from it is what the user trusts in the manufacturer app, so it must
@@ -87,9 +98,13 @@ func main() {
 
 	conf, err := api.NewConfiguration(
 		"SlimHuys", "SlimHuys", "EEBUS-Bridge", serial,
+		[]shipapi.DeviceCategoryType{shipapi.DeviceCategoryTypeEnergyManagementSystem},
 		model.DeviceTypeTypeEnergyManagementSystem,
-		[]model.EntityTypeType{model.EntityTypeTypeCEM},
-		cfg.Port, certificate, 4*time.Second)
+		entityTypes(cfg),
+		cfg.Port, certificate, 4*time.Second,
+		nil, // no SHIP QR pairing: the device is trusted by SKI
+		nil, // in-memory SHIP ring buffer
+	)
 	if err != nil {
 		log.Fatalf("eebus configuration: %v", err)
 	}
@@ -97,6 +112,9 @@ func main() {
 
 	b := NewBridge(cfg)
 	b.svc = service.NewService(conf, b)
+	// Accept the device's pairing request once the user trusted us in the
+	// manufacturer app.
+	b.svc.UserIsAbleToApproveOrCancelPairingRequests(true)
 	b.svc.SetLogging(newLogger(cfg.Debug))
 	if err := b.svc.Setup(); err != nil {
 		log.Fatalf("eebus setup: %v", err)
@@ -106,12 +124,16 @@ func main() {
 	// our CEM entity; subscriptions on other entities are done by the poller.
 	b.svc.AddUseCase(mpc.NewMPC(b.local, nil))
 	b.setupLPC(b.local)
-	if err := spine.Events.Subscribe(b); err != nil {
+	b.setupHVAC(b.local)
+	b.setupGrid()
+	if err := b.local.Device().Events().Subscribe(b); err != nil {
 		log.Fatalf("eebus events: %v", err)
 	}
 
 	log.Printf("Local SKI: %s (trust this in the manufacturer app, e.g. myVAILLANT → Network → EEBUS)", localSKI)
-	b.svc.Start()
+	if err := b.svc.Start(); err != nil {
+		log.Fatalf("eebus start: %v", err)
+	}
 	if cfg.DeviceSKI != "" {
 		b.useSKI(cfg.DeviceSKI)
 	} else {
