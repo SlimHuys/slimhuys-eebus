@@ -157,3 +157,21 @@ func TestLPCConfigs(t *testing.T) {
 		t.Errorf("want 4 entities, got %d", len(cfgs))
 	}
 }
+
+func TestInvalidValueIsUnavailable(t *testing.T) {
+	p := NewPublisher(Config{MQTTHost: "127.0.0.1", MQTTPort: 1, TopicPrefix: "x", DiscoveryPrefix: "homeassistant"}, DeviceInfo{SKI: "abcdef0123"}, nil)
+	now := time.Now()
+	m := newMeasurement("HVACRoom", "5:1:1", 0, Description{"temperature", "roomAirTemperature", "degC"})
+	m.Value, m.Updated, m.ValueState = 0, now, "error"
+	p.Measurement(*m)
+	p.Refresh(now, 12*time.Minute)
+	if p.fresh[m.Key] {
+		t.Error(`a value with valueState "error" must be unavailable`)
+	}
+	m.Value, m.ValueState = 21.5, "normal"
+	p.Measurement(*m)
+	p.Refresh(now, 12*time.Minute)
+	if !p.fresh[m.Key] {
+		t.Error("a normal value must be available")
+	}
+}

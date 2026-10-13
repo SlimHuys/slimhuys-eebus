@@ -453,7 +453,9 @@ func (p *Publisher) stateLocked(m *Measurement) {
 	if m.Updated.IsZero() {
 		return
 	}
-	p.publish(p.topics.state(m.Key), formatValue(m.Value), true)
+	if m.valid() {
+		p.publish(p.topics.state(m.Key), formatValue(m.Value), true)
+	}
 	p.publishJSON(p.topics.attributes(m.Key), map[string]any{
 		"last_update":    m.Updated.UTC().Format(time.RFC3339),
 		"source":         m.Source,
@@ -470,7 +472,7 @@ func (p *Publisher) Measurement(m Measurement) {
 	cp := m
 	_, seen := p.known[m.Key]
 	p.known[m.Key] = &cp
-	p.fresh[m.Key] = true
+	p.fresh[m.Key] = cp.valid()
 	if !seen {
 		p.announceLocked(&cp)
 	}
@@ -502,7 +504,7 @@ func (p *Publisher) Refresh(now time.Time, staleAfter time.Duration) {
 		p.publish(p.topics.deviceAvail(), onOff(online, "online", "offline"), true)
 	}
 	for key, m := range p.known {
-		fresh := now.Sub(m.Updated) < staleAfter
+		fresh := now.Sub(m.Updated) < staleAfter && m.valid()
 		if fresh != p.fresh[key] {
 			p.fresh[key] = fresh
 			p.publish(p.topics.avail(key), onOff(fresh, "online", "offline"), true)

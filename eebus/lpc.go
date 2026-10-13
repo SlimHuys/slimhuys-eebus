@@ -132,12 +132,6 @@ func (b *Bridge) refreshLPC() {
 			log.Printf("Note: the device's failsafe limit is %s W. If this add-on stops, the heat pump is held at that limit for at least %s.",
 				formatValue(st.Failsafe), st.FailsafeDuration)
 		}
-		if !st.Active && st.Limit < lpcLeftoverBelow {
-			max := b.lpcMax(st)
-			log.Printf("Inactive power limit of %s W found; setting it to %s W so switching it on cannot stop the heat pump by accident",
-				formatValue(st.Limit), formatValue(max))
-			b.writeLPC(e, max, false)
-		}
 	}
 	b.publishLPC(st)
 }
@@ -257,4 +251,42 @@ func (b *Bridge) checkLPCExpiry(now time.Time) {
 		log.Printf("Power limit reached its maximum duration of %d minutes, switching it off", b.cfg.PowerLimitMaxMinutes)
 		b.SetLPCActive(false)
 	}
+}
+
+// Wait this long after connecting before touching the limit: the VR940 only
+// accepts limits from an energy guard whose heartbeat it already receives,
+// and that subscription is set up a moment after the connection (a write one
+// second too early came back as "error 7 Write failed").
+const lpcLeftoverAfter = 30 * time.Second
+
+const lpcLeftoverMaxTries = 5
+
+// fixLPCLeftover raises an inactive limit below lpcLeftoverBelow to the
+// maximum, so switching the limit on cannot stop the heat pump by accident.
+// Called from the poller; retried until the device accepts it.
+func (b *Bridge) fixLPCLeftover() {
+	b.mu.Lock()
+	st := b.lpcState
+	due := !b.lpcLeftoverDone && b.lpcChecked && st.Supported &&
+		time.Since(b.connectedAt) >= lpcLeftoverAfter && b.lpcLeftoverTries < lpcLeftoverMaxTries
+	if due && (st.Active || st.Limit >= lpcLeftoverBelow || b.lpcLimitSet) {
+		// Nothing to fix (or the user already chose a value).
+		b.lpcLeftoverDone, due = true, false
+	}
+	if due {
+		b.lpcLeftoverTries++
+	}
+	tries := b.lpcLeftoverTries
+	b.mu.Unlock()
+	if !due {
+		return
+	}
+	e := b.lpcEntity()
+	if e == nil {
+		return
+	}
+	max := b.lpcMax(st)
+	log.Printf("Inactive power limit of %s W found; setting it to %s W so switching it on cannot stop the heat pump by accident (attempt %d/%d)",
+		formatValue(st.Limit), formatValue(max), tries, lpcLeftoverMaxTries)
+	b.writeLPC(e, max, false)
 }

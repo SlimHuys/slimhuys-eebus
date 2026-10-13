@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.3.3
+
+- Values the device flags as invalid (`valueState` other than `normal`) are
+  shown as *unavailable* instead of as a number. The VR940 reports a room
+  temperature of 0 °C with state `error` right after its EEBUS service
+  restarts.
+- The startup fix for a leftover 0 W power limit now waits 30 seconds after
+  connecting and retries up to five times. Right after a connection the
+  VR940 does not yet receive our heartbeat and answers `error 7 Write failed`.
+
 ## 0.3.2
 
 - Fix: switching the power limit on right after changing its value

@@ -148,3 +148,16 @@ Each sensor has its own availability. If a value is not refreshed within
 `stale_after`, it turns *unavailable* instead of showing an old number. If no
 value at all arrives, the add-on reconnects; after three failed reconnects it
 exits so the Supervisor restarts it.
+
+## Troubleshooting
+
+**Connected, but no values at all.** Seen once on a VR940: after a series of
+power limit writes and quick reconnects, the gateway accepted the connection
+but never answered. With `debug: true` the log then shows our
+`read NodeManagementDetailedDiscoveryData` without a reply. Switch EEBUS off
+and on again in the myVAILLANT app (Settings → Network → EEBUS); the add-on
+reconnects by itself. Note that this also clears an active power limit in the
+device.
+
+**`rejected the connection`.** The add-on is not trusted yet, or another
+EEBUS manager is connected. Most devices accept only one.

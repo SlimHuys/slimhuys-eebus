@@ -168,6 +168,13 @@ func newMeasurement(entityType, address string, id uint, d Description) *Measure
 	}
 }
 
+// valid reports whether the device vouches for the value. The VR940 sends
+// e.g. a room temperature of 0 with valueState "error" right after its EEBUS
+// service restarts; that must not show up as a real 0 °C.
+func (m *Measurement) valid() bool {
+	return m.ValueState == "" || m.ValueState == "normal"
+}
+
 func formatValue(v float64) string {
 	return strconv.FormatFloat(v, 'f', -1, 64)
 }

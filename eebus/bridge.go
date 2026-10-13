@@ -41,25 +41,27 @@ type Bridge struct {
 	svc   *service.Service
 	local spineapi.EntityLocalInterface
 
-	mu             sync.Mutex
-	ski            string
-	device         DeviceInfo
-	pub            *Publisher
-	connected      bool
-	connectedAt    time.Time
-	lastData       time.Time
-	lastPoll       time.Time
-	reconnects     int
-	lastRejectLog  time.Time
-	lpc            *eglpc.LPC
-	lpcState       LPCState
-	lpcChecked     bool
-	lpcLimitSet    bool    // the limit value was set from Home Assistant in this run
-	lpcWant        float64 // last limit value asked for from Home Assistant
-	hvac           *hvac
-	hvacSummary    string
-	operatingState string
-	grid           *grid
+	mu               sync.Mutex
+	ski              string
+	device           DeviceInfo
+	pub              *Publisher
+	connected        bool
+	connectedAt      time.Time
+	lastData         time.Time
+	lastPoll         time.Time
+	reconnects       int
+	lastRejectLog    time.Time
+	lpc              *eglpc.LPC
+	lpcState         LPCState
+	lpcChecked       bool
+	lpcLimitSet      bool    // the limit value was set from Home Assistant in this run
+	lpcWant          float64 // last limit value asked for from Home Assistant
+	lpcLeftoverDone  bool
+	lpcLeftoverTries int
+	hvac             *hvac
+	hvacSummary      string
+	operatingState   string
+	grid             *grid
 	// counters for the hourly "still alive" log line
 	statValues, statPushed int
 	statSince              time.Time
@@ -338,6 +340,7 @@ func (b *Bridge) loop() {
 			continue
 		}
 		b.checkLPCExpiry(now)
+		b.fixLPCLeftover()
 
 		if sincePoll >= b.cfg.pollInterval() || (!gotData && sincePoll >= initialPollEvery) {
 			b.poll()
@@ -372,6 +375,7 @@ func (b *Bridge) RemoteServiceConnected(_ api.ServiceInterface, id shipapi.Servi
 	b.connectedAt = time.Now()
 	b.lastPoll = time.Time{}
 	b.lpcChecked = false
+	b.lpcLeftoverDone, b.lpcLeftoverTries = false, 0
 	pub := b.pub
 	b.mu.Unlock()
 	if pub != nil {
