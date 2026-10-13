@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/enbility/eebus-go/api"
+	"github.com/enbility/eebus-go/features/client"
 	ucapi "github.com/enbility/eebus-go/usecases/api"
 	eglpc "github.com/enbility/eebus-go/usecases/eg/lpc"
 	spineapi "github.com/enbility/spine-go/api"
@@ -164,10 +165,25 @@ func (b *Bridge) writeLPC(e spineapi.EntityRemoteInterface, value float64, activ
 			}
 			log.Printf("Device rejected power limit %s W (active: %v): error %d %s", formatValue(value), active, *res.ErrorNumber, desc)
 		}
+		// The VR940 does not always notify a change it made on our request
+		// (switching a limit off went unreported), so ask for the result.
+		b.requestLPCData(e)
 		b.refreshLPC()
 	})
 	if err != nil {
 		log.Printf("Writing power limit failed: %v", err)
+	}
+}
+
+// requestLPCData asks the device for its current limits; the answer arrives
+// as an LPC data update event.
+func (b *Bridge) requestLPCData(e spineapi.EntityRemoteInterface) {
+	lc, err := client.NewLoadControl(b.local, e)
+	if err != nil {
+		return
+	}
+	if _, err := lc.RequestLimitData(nil, nil); err != nil && b.cfg.Debug {
+		log.Printf("requesting power limit data: %v", err)
 	}
 }
 
@@ -184,6 +200,11 @@ func (b *Bridge) SetLPCLimit(value float64) {
 	value = math.Max(0, math.Min(value, b.lpcMax(st)))
 	b.mu.Lock()
 	b.lpcLimitSet = true
+	// Remember what was asked: the device confirms a new value only after
+	// ~10 s, and switching on in between must use this value, not the old
+	// confirmed one (that is how a 1000 W test became an active 10000 W
+	// limit on 13 October 2026).
+	b.lpcWant = value
 	b.mu.Unlock()
 	log.Printf("Power limit set to %s W (active: %v)", formatValue(value), st.Active)
 	b.writeLPC(e, value, st.Active)
@@ -198,6 +219,9 @@ func (b *Bridge) SetLPCActive(on bool) {
 	}
 	b.mu.Lock()
 	st := b.lpcState
+	if b.lpcLimitSet {
+		st.Limit = b.lpcWant
+	}
 	if on && st.Limit < lpcLeftoverBelow && !b.lpcLimitSet {
 		b.mu.Unlock()
 		log.Printf("Not switching the power limit on: it is %s W, which would stop the heat pump, and it was not set from Home Assistant. Set the Power limit first (0 W is allowed when set on purpose).", formatValue(st.Limit))

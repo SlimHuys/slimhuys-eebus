@@ -54,7 +54,8 @@ type Bridge struct {
 	lpc            *eglpc.LPC
 	lpcState       LPCState
 	lpcChecked     bool
-	lpcLimitSet    bool // the limit value was set from Home Assistant in this run
+	lpcLimitSet    bool    // the limit value was set from Home Assistant in this run
+	lpcWant        float64 // last limit value asked for from Home Assistant
 	hvac           *hvac
 	hvacSummary    string
 	operatingState string
@@ -291,7 +292,10 @@ func (b *Bridge) poll() {
 			log.Printf("request %s: %v", e.EntityType(), err)
 		}
 	}
-	// Safety net for devices that do not push setpoint changes.
+	// Safety net for devices that do not push every change.
+	if e := b.lpcEntity(); e != nil {
+		b.requestLPCData(e)
+	}
 	if b.hvac != nil {
 		if e := b.entityFor(b.hvac.dhwSP); e != nil {
 			b.hvac.dhwSP.connect(e) // subscribes if needed, then requests the data

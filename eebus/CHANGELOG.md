@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.3.2
+
+- Fix: switching the power limit on right after changing its value
+  activated the *old* value. The VR940 confirms a new limit only after about
+  10 seconds; the switch now uses the value last asked for. Seen in a live
+  test: a 1000 W limit became an active 10000 W limit.
+- Fix: the power limit could keep showing *on* after it was switched off.
+  The VR940 did not report that change by itself; the add-on now asks for
+  the limit after every write and on every poll.
+
 ## 0.3.1
 
 - Hot water and heating are logged whenever their state changes, instead of
