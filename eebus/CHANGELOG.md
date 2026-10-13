@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.3.4
+
+- An invalid value now also clears the number in Home Assistant (payload
+  `None`). Before, the heating entity kept showing the last room temperature
+  (0 °C) as its current temperature.
+
 ## 0.3.3
 
 - Values the device flags as invalid (`valueState` other than `normal`) are

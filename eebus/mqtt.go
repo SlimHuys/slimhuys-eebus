@@ -455,6 +455,11 @@ func (p *Publisher) stateLocked(m *Measurement) {
 	}
 	if m.valid() {
 		p.publish(p.topics.state(m.Key), formatValue(m.Value), true)
+	} else {
+		// "None" clears the value in Home Assistant; otherwise the climate
+		// entity, which reads the room temperature from this topic, keeps
+		// showing the last (retained) number.
+		p.publish(p.topics.state(m.Key), "None", true)
 	}
 	p.publishJSON(p.topics.attributes(m.Key), map[string]any{
 		"last_update":    m.Updated.UTC().Format(time.RFC3339),
