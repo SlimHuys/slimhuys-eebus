@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.3.1
+
+- Hot water and heating are logged whenever their state changes, instead of
+  once on the (usually incomplete) first snapshot after connecting.
+- Confirmed on a Vaillant VR940: writing the hot water setpoint, the room
+  setpoint and the hot water mode; each change came back from the device
+  within about a second.
+
 ## 0.3.0
 
 - **Hot water**: mode (select), setpoint (number) and one-time boost

@@ -1,5 +1,5 @@
 name: SlimHuys EEBUS
-version: "0.3.0"
+version: "0.3.1"
 slug: slimhuys_eebus
 description: Local EEBUS bridge for heat pumps (Vaillant VR940/VR921) to Home Assistant via MQTT
 url: https://github.com/SlimHuys/slimhuys-eebus

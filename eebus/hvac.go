@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"log"
 	"slices"
 
@@ -157,21 +158,25 @@ func (b *Bridge) refreshHVAC() {
 	}
 	dhw, room := b.readDHW(), b.readRoom()
 
-	b.mu.Lock()
-	first := !b.hvacLogged && (dhw.ModeKnown || room.ModeKnown)
-	if first {
-		b.hvacLogged = true
+	// Log whenever the summary changes: the first snapshot right after
+	// connecting is usually incomplete, and later changes (also those made
+	// in the myVAILLANT app) are worth a line.
+	sp := "unknown"
+	if dhw.Setpoint != nil {
+		sp = formatValue(dhw.Setpoint.Value) + " °C"
 	}
+	roomSP := "unknown"
+	if room.SetpointKnown {
+		roomSP = formatValue(room.Setpoint) + " °C"
+	}
+	summary := fmt.Sprintf("Hot water: mode %s, boost %s, setpoint %s · Heating: mode %s, setpoint %s",
+		orUnknown(dhw.Mode), orUnknown(dhw.BoostStatus), sp, orUnknown(room.Mode), roomSP)
+	b.mu.Lock()
+	changed := summary != b.hvacSummary
+	b.hvacSummary = summary
 	b.mu.Unlock()
-	if first {
-		sp := "unknown"
-		if dhw.Setpoint != nil {
-			sp = formatValue(dhw.Setpoint.Value) + " °C"
-		}
-		log.Printf("Hot water: mode %q of %v (writable: %v), boost %q (writable: %v), setpoint %s",
-			dhw.Mode, dhw.Modes, dhw.ModeWritable, dhw.BoostStatus, dhw.BoostWritable, sp)
-		log.Printf("Heating: mode %q of %v (writable: %v), setpoint %s °C (writable: %v)",
-			room.Mode, room.Modes, room.ModeWritable, formatValue(room.Setpoint), room.SetpointWritable)
+	if changed {
+		log.Print(summary)
 	}
 	if pub := b.publisher(); pub != nil {
 		pub.HVAC(dhw, room)
@@ -306,4 +311,11 @@ func (b *Bridge) onDiagnosis(d *model.DeviceDiagnosisStateDataType) {
 	if pub := b.publisher(); pub != nil {
 		pub.OperatingState(state)
 	}
+}
+
+func orUnknown(s string) string {
+	if s == "" {
+		return "unknown"
+	}
+	return s
 }

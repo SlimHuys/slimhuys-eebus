@@ -56,7 +56,7 @@ type Bridge struct {
 	lpcChecked     bool
 	lpcLimitSet    bool // the limit value was set from Home Assistant in this run
 	hvac           *hvac
-	hvacLogged     bool
+	hvacSummary    string
 	operatingState string
 	grid           *grid
 	// counters for the hourly "still alive" log line
