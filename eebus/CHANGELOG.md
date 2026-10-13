@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.1.2
+
+- SlimHuys icon and logo in the add-on store.
+- Hourly log line with the number of values received and how many the device
+  pushed by itself, so a quiet log can be told apart from a stuck bridge.
+- No more `ERROR … http: Server closed` on a normal restart.
+
 ## 0.1.1
 
 - Log the MQTT broker at startup and why connecting fails (wrong host,

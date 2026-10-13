@@ -21,6 +21,7 @@ const (
 	// detailed discovery of the remote entities takes a few seconds.
 	initialPollEvery = 15 * time.Second
 	tickEvery        = 15 * time.Second
+	statsEvery       = time.Hour
 	// How often a stale connection is torn down before the process gives up
 	// and lets the Supervisor restart it.
 	maxReconnects = 3
@@ -49,11 +50,14 @@ type Bridge struct {
 	lastPoll      time.Time
 	reconnects    int
 	lastRejectLog time.Time
-	descs         map[string]Description           // "<address>/<id>"
-	pending       map[string]pendingValue          // values that arrived before their description
-	measures      map[string]*Measurement          // "<address>/<id>"
-	descAsked     map[string]time.Time             // "<address>" -> last description request
-	candidates    map[string]shipapi.RemoteService // discovered devices, by SKI
+	// counters for the hourly "still alive" log line
+	statValues, statPushed int
+	statSince              time.Time
+	descs                  map[string]Description           // "<address>/<id>"
+	pending                map[string]pendingValue          // values that arrived before their description
+	measures               map[string]*Measurement          // "<address>/<id>"
+	descAsked              map[string]time.Time             // "<address>" -> last description request
+	candidates             map[string]shipapi.RemoteService // discovered devices, by SKI
 }
 
 func NewBridge(cfg Config) *Bridge {
@@ -237,6 +241,10 @@ func (b *Bridge) updateLocked(e spineapi.EntityRemoteInterface, addr string, id 
 	m.Updated = pv.at
 	b.lastData = pv.at
 	b.reconnects = 0
+	b.statValues++
+	if pv.source == "notify" {
+		b.statPushed++
+	}
 	cp := *m
 	return &cp
 }
@@ -287,8 +295,20 @@ func (b *Bridge) loop() {
 		}
 		ski := b.ski
 		pub := b.pub
+		var stats string
+		if b.statSince.IsZero() {
+			b.statSince = now
+		} else if now.Sub(b.statSince) >= statsEvery {
+			// A quiet log must not look the same as a stuck bridge.
+			stats = fmt.Sprintf("Last hour: %d values received (%d pushed by the device), connected: %v",
+				b.statValues, b.statPushed, connected)
+			b.statValues, b.statPushed, b.statSince = 0, 0, now
+		}
 		b.mu.Unlock()
 
+		if stats != "" {
+			log.Print(stats)
+		}
 		if pub != nil {
 			pub.Refresh(now, b.cfg.staleAfter())
 		}

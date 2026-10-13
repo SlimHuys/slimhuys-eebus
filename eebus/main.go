@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 
@@ -154,7 +155,16 @@ func (l *logger) Infof(format string, args ...interface{}) {
 		log.Printf(format, args...)
 	}
 }
-func (l *logger) Error(args ...interface{}) { log.Print(append([]interface{}{"ERROR "}, args...)...) }
+func (l *logger) Error(args ...interface{}) { l.error(fmt.Sprint(args...)) }
 func (l *logger) Errorf(format string, args ...interface{}) {
-	log.Print("ERROR " + fmt.Sprintf(format, args...))
+	l.error(fmt.Sprintf(format, args...))
+}
+
+func (l *logger) error(msg string) {
+	// eebus-go reports its own clean shutdown as an error; that only scares
+	// people reading the add-on log.
+	if strings.Contains(msg, "http: Server closed") {
+		return
+	}
+	log.Print("ERROR " + msg)
 }
