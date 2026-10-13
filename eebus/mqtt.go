@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -63,6 +65,14 @@ func (t Topics) config(component, key string) string {
 }
 func (t Topics) haStatus() string { return t.discovery + "/status" }
 
+func (t Topics) lpcAvail() string     { return t.base() + "/power_limit/availability" }
+func (t Topics) lpcLimit() string     { return t.base() + "/power_limit/state" }
+func (t Topics) lpcLimitSet() string  { return t.base() + "/power_limit/set" }
+func (t Topics) lpcActive() string    { return t.base() + "/power_limit_active/state" }
+func (t Topics) lpcActiveSet() string { return t.base() + "/power_limit_active/set" }
+func (t Topics) lpcFailsafe() string  { return t.base() + "/power_limit_failsafe/state" }
+func (t Topics) lpcExpires() string   { return t.base() + "/power_limit_ends/state" }
+
 type discoveryDevice struct {
 	Identifiers  []string `json:"identifiers"`
 	Name         string   `json:"name"`
@@ -91,6 +101,12 @@ type discoveryConfig struct {
 	EntityCategory    string          `json:"entity_category,omitempty"`
 	PayloadOn         string          `json:"payload_on,omitempty"`
 	PayloadOff        string          `json:"payload_off,omitempty"`
+	CommandTopic      string          `json:"command_topic,omitempty"`
+	Min               *float64        `json:"min,omitempty"`
+	Max               *float64        `json:"max,omitempty"`
+	Step              float64         `json:"step,omitempty"`
+	Mode              string          `json:"mode,omitempty"`
+	Icon              string          `json:"icon,omitempty"`
 	Availability      []availability  `json:"availability"`
 	AvailabilityMode  string          `json:"availability_mode,omitempty"`
 	Device            discoveryDevice `json:"device"`
@@ -165,6 +181,52 @@ func lastUpdateConfig(t Topics, d DeviceInfo) discoveryConfig {
 	}
 }
 
+func lpcAvailability(t Topics) []availability {
+	return []availability{{Topic: t.bridgeStatus()}, {Topic: t.deviceAvail()}, {Topic: t.lpcAvail()}}
+}
+
+func lpcConfigs(t Topics, d DeviceInfo, max float64) map[string]discoveryConfig {
+	zero := 0.0
+	id := func(k string) string { return fmt.Sprintf("%s_%s_%s", t.prefix, d.SKI, k) }
+	return map[string]discoveryConfig{
+		"number/power_limit": {
+			Name: "Power limit", UniqueID: id("power_limit"),
+			StateTopic: t.lpcLimit(), CommandTopic: t.lpcLimitSet(),
+			Min: &zero, Max: &max, Step: 100, Mode: "box",
+			Unit: "W", DeviceClass: "power", Icon: "mdi:speedometer-slow",
+			Availability: lpcAvailability(t), AvailabilityMode: "all",
+			Device: deviceBlock(d), Origin: origin(),
+		},
+		"switch/power_limit_active": {
+			Name: "Power limit active", UniqueID: id("power_limit_active"),
+			StateTopic: t.lpcActive(), CommandTopic: t.lpcActiveSet(),
+			PayloadOn: "ON", PayloadOff: "OFF", Icon: "mdi:transmission-tower-off",
+			Availability: lpcAvailability(t), AvailabilityMode: "all",
+			Device: deviceBlock(d), Origin: origin(),
+		},
+		"sensor/power_limit_failsafe": {
+			Name: "Failsafe power limit", UniqueID: id("power_limit_failsafe"),
+			StateTopic: t.lpcFailsafe(), Unit: "W", DeviceClass: "power",
+			EntityCategory: "diagnostic",
+			Availability:   lpcAvailability(t), AvailabilityMode: "all",
+			Device: deviceBlock(d), Origin: origin(),
+		},
+		"sensor/power_limit_ends": {
+			Name: "Power limit ends", UniqueID: id("power_limit_ends"),
+			StateTopic: t.lpcExpires(), DeviceClass: "timestamp",
+			EntityCategory: "diagnostic",
+			Availability:   lpcAvailability(t), AvailabilityMode: "all",
+			Device: deviceBlock(d), Origin: origin(),
+		},
+	}
+}
+
+// CommandHandler receives writes from Home Assistant.
+type CommandHandler interface {
+	SetLPCLimit(value float64)
+	SetLPCActive(on bool)
+}
+
 // Publisher is the MQTT side of the bridge.
 type Publisher struct {
 	client paho.Client
@@ -177,14 +239,20 @@ type Publisher struct {
 	connected bool
 	online    bool
 	lastData  time.Time
+
+	handler      CommandHandler
+	lpc          *LPCState
+	lpcMax       float64
+	lpcAnnounced bool
 }
 
-func NewPublisher(cfg Config, device DeviceInfo) *Publisher {
+func NewPublisher(cfg Config, device DeviceInfo, handler CommandHandler) *Publisher {
 	p := &Publisher{
-		topics: Topics{discovery: cfg.DiscoveryPrefix, prefix: cfg.TopicPrefix, ski8: device.shortSKI()},
-		device: device,
-		known:  map[string]*Measurement{},
-		fresh:  map[string]bool{},
+		handler: handler,
+		topics:  Topics{discovery: cfg.DiscoveryPrefix, prefix: cfg.TopicPrefix, ski8: device.shortSKI()},
+		device:  device,
+		known:   map[string]*Measurement{},
+		fresh:   map[string]bool{},
 	}
 
 	opts := paho.NewClientOptions().
@@ -232,6 +300,24 @@ func (p *Publisher) onConnect(c paho.Client) {
 			p.republishAll()
 		}
 	})
+	if p.handler != nil {
+		c.Subscribe(p.topics.lpcLimitSet(), 1, func(_ paho.Client, msg paho.Message) {
+			v, err := strconv.ParseFloat(strings.TrimSpace(string(msg.Payload())), 64)
+			if err != nil {
+				log.Printf("Ignoring power limit %q: not a number", msg.Payload())
+				return
+			}
+			p.handler.SetLPCLimit(v)
+		})
+		c.Subscribe(p.topics.lpcActiveSet(), 1, func(_ paho.Client, msg paho.Message) {
+			switch strings.ToUpper(strings.TrimSpace(string(msg.Payload()))) {
+			case "ON":
+				p.handler.SetLPCActive(true)
+			case "OFF":
+				p.handler.SetLPCActive(false)
+			}
+		})
+	}
 	p.republishAll()
 }
 
@@ -275,6 +361,45 @@ func (p *Publisher) republishAll() {
 		p.announceLocked(m)
 		p.stateLocked(m)
 	}
+	p.lpcAnnounced = false
+	p.lpcLocked()
+}
+
+// LPC publishes the power limit state.
+func (p *Publisher) LPC(st LPCState, max float64) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if max != p.lpcMax {
+		p.lpcAnnounced = false
+	}
+	p.lpc, p.lpcMax = &st, max
+	p.lpcLocked()
+}
+
+func (p *Publisher) lpcLocked() {
+	if p.lpc == nil {
+		return
+	}
+	st := p.lpc
+	if st.Supported && !p.lpcAnnounced {
+		for k, cfg := range lpcConfigs(p.topics, p.device, p.lpcMax) {
+			parts := strings.SplitN(k, "/", 2)
+			p.publishJSON(p.topics.config(parts[0], parts[1]), cfg)
+		}
+		p.lpcAnnounced = true
+	}
+	p.publish(p.topics.lpcAvail(), onOff(st.Supported, "online", "offline"), true)
+	if !st.Supported {
+		return
+	}
+	p.publish(p.topics.lpcLimit(), formatValue(st.Limit), true)
+	p.publish(p.topics.lpcActive(), onOff(st.Active, "ON", "OFF"), true)
+	p.publish(p.topics.lpcFailsafe(), formatValue(st.Failsafe), true)
+	ends := "None"
+	if !st.Expires.IsZero() {
+		ends = st.Expires.UTC().Format(time.RFC3339)
+	}
+	p.publish(p.topics.lpcExpires(), ends, true)
 }
 
 // SetDevice updates brand/model once the device announced itself.

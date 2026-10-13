@@ -105,7 +105,7 @@ func TestDisplayNameFallback(t *testing.T) {
 func TestPublisherFreshness(t *testing.T) {
 	// No broker: publish is a no-op when not connected, but state tracking
 	// must still work.
-	p := NewPublisher(Config{MQTTHost: "127.0.0.1", MQTTPort: 1, TopicPrefix: "x", DiscoveryPrefix: "homeassistant"}, DeviceInfo{SKI: "abcdef0123"})
+	p := NewPublisher(Config{MQTTHost: "127.0.0.1", MQTTPort: 1, TopicPrefix: "x", DiscoveryPrefix: "homeassistant"}, DeviceInfo{SKI: "abcdef0123"}, nil)
 	now := time.Now()
 	m := newMeasurement("HeatPumpAppliance", "3", 1, Description{"power", "acPowerTotal", "W"})
 	m.Value, m.Updated = 360, now.Add(-30*time.Minute)
@@ -131,5 +131,29 @@ func TestPublisherFreshness(t *testing.T) {
 	p.Refresh(now, 12*time.Minute)
 	if p.online {
 		t.Error("device must be offline when EEBUS is disconnected")
+	}
+}
+
+func TestLPCConfigs(t *testing.T) {
+	topics := Topics{discovery: "homeassistant", prefix: "slimhuys_eebus", ski8: "5859fe43"}
+	dev := DeviceInfo{SKI: "5859fe434472f43bfd73ee53122a60ab25626c04", Brand: "Vaillant", Model: "VR940"}
+	cfgs := lpcConfigs(topics, dev, 4200)
+
+	b, _ := json.Marshal(cfgs["number/power_limit"])
+	var num map[string]any
+	_ = json.Unmarshal(b, &num)
+	// min 0 must be sent explicitly: HA's default minimum for an MQTT number is 1
+	if num["min"] != 0.0 || num["max"] != 4200.0 || num["command_topic"] != "slimhuys_eebus/5859fe43/power_limit/set" {
+		t.Errorf("number config: %s", b)
+	}
+
+	b, _ = json.Marshal(cfgs["switch/power_limit_active"])
+	var sw map[string]any
+	_ = json.Unmarshal(b, &sw)
+	if sw["payload_on"] != "ON" || sw["state_topic"] != "slimhuys_eebus/5859fe43/power_limit_active/state" {
+		t.Errorf("switch config: %s", b)
+	}
+	if len(cfgs) != 4 {
+		t.Errorf("want 4 entities, got %d", len(cfgs))
 	}
 }

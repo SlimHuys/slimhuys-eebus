@@ -1,0 +1,219 @@
+package main
+
+import (
+	"log"
+	"math"
+	"time"
+
+	"github.com/enbility/eebus-go/api"
+	ucapi "github.com/enbility/eebus-go/usecases/api"
+	eglpc "github.com/enbility/eebus-go/usecases/eg/lpc"
+	spineapi "github.com/enbility/spine-go/api"
+	"github.com/enbility/spine-go/model"
+)
+
+// LPCState is the power limit (EEBUS "Limitation of Power Consumption") as
+// the device reports it. Home Assistant always shows this, never what we
+// last sent, so a rejected write is visible.
+type LPCState struct {
+	Supported        bool
+	Active           bool
+	Limit            float64
+	NominalMax       float64
+	Failsafe         float64
+	FailsafeDuration time.Duration
+	Expires          time.Time // zero = no automatic end
+}
+
+// A limit below this, left in the device while inactive, is treated as a
+// leftover: switching it on would stop the heat pump outright.
+const lpcLeftoverBelow = 500
+
+// fallback for the number entity's maximum when the device does not report
+// its nominal power
+const lpcDefaultMax = 10000
+
+func (b *Bridge) setupLPC(local spineapi.EntityLocalInterface) {
+	b.lpc = eglpc.NewLPC(local, b.onLPCEvent)
+	b.svc.AddUseCase(b.lpc)
+	// The device only accepts limits from an energy guard that sends
+	// heartbeats; when they stop it falls back to its failsafe limit.
+	if err := local.HeartbeatManager().StartHeartbeat(); err != nil {
+		log.Printf("Could not start EEBUS heartbeat: %v", err)
+	}
+}
+
+func (b *Bridge) onLPCEvent(ski string, _ spineapi.DeviceRemoteInterface, _ spineapi.EntityRemoteInterface, event api.EventType) {
+	if normalizeSKI(ski) != b.currentSKI() {
+		return
+	}
+	switch event {
+	case eglpc.UseCaseSupportUpdate, eglpc.DataUpdateLimit,
+		eglpc.DataUpdateFailsafeConsumptionActivePowerLimit, eglpc.DataUpdateFailsafeDurationMinimum:
+		b.refreshLPC()
+	}
+}
+
+// lpcEntity returns the remote entity of our device that supports LPC
+// scenario 1. A gateway like the VR940 exposes several entities; only the
+// heat pump appliance accepts limits.
+func (b *Bridge) lpcEntity() spineapi.EntityRemoteInterface {
+	if b.lpc == nil {
+		return nil
+	}
+	target := b.currentSKI()
+	for _, rs := range b.lpc.RemoteEntitiesScenarios() {
+		if rs.Entity == nil || rs.Entity.Device() == nil || normalizeSKI(rs.Entity.Device().Ski()) != target {
+			continue
+		}
+		for _, s := range rs.Scenarios {
+			if s == 1 {
+				return rs.Entity
+			}
+		}
+	}
+	return nil
+}
+
+func (b *Bridge) refreshLPC() {
+	e := b.lpcEntity()
+
+	b.mu.Lock()
+	st := b.lpcState
+	b.mu.Unlock()
+
+	if e == nil {
+		st.Supported = false
+		b.publishLPC(st)
+		return
+	}
+	st.Supported = true
+	if l, err := b.lpc.ConsumptionLimit(e); err == nil {
+		st.Limit, st.Active = l.Value, l.IsActive
+	}
+	if v, err := b.lpc.ConsumptionNominalMax(e); err == nil && v > 0 {
+		st.NominalMax = v
+	}
+	if v, err := b.lpc.FailsafeConsumptionActivePowerLimit(e); err == nil {
+		st.Failsafe = v
+	}
+	if d, err := b.lpc.FailsafeDurationMinimum(e); err == nil {
+		st.FailsafeDuration = d
+	}
+	b.mu.Lock()
+	first := !b.lpcChecked
+	b.lpcChecked = true
+	switch {
+	case !st.Active:
+		st.Expires = time.Time{}
+	case b.lpcState.Expires.IsZero() && b.cfg.PowerLimitMaxMinutes > 0:
+		// Active limit we did not set in this run (e.g. after a restart):
+		// give it the same maximum duration, so it can never stick forever.
+		st.Expires = time.Now().Add(time.Duration(b.cfg.PowerLimitMaxMinutes) * time.Minute)
+	default:
+		st.Expires = b.lpcState.Expires
+	}
+	b.lpcState = st
+	b.mu.Unlock()
+
+	if first {
+		log.Printf("Power limit supported: limit %s W (active: %v), failsafe %s W for %s",
+			formatValue(st.Limit), st.Active, formatValue(st.Failsafe), st.FailsafeDuration)
+		if st.Failsafe > 0 && st.Failsafe < b.lpcMax(st) {
+			log.Printf("Note: the device's failsafe limit is %s W. If this add-on stops, the heat pump is held at that limit for at least %s.",
+				formatValue(st.Failsafe), st.FailsafeDuration)
+		}
+		if !st.Active && st.Limit < lpcLeftoverBelow {
+			max := b.lpcMax(st)
+			log.Printf("Inactive power limit of %s W found; setting it to %s W so switching it on cannot stop the heat pump by accident",
+				formatValue(st.Limit), formatValue(max))
+			b.writeLPC(e, max, false)
+		}
+	}
+	b.publishLPC(st)
+}
+
+func (b *Bridge) lpcMax(st LPCState) float64 {
+	if st.NominalMax > 0 {
+		return st.NominalMax
+	}
+	return lpcDefaultMax
+}
+
+func (b *Bridge) publishLPC(st LPCState) {
+	if pub := b.publisher(); pub != nil {
+		pub.LPC(st, b.lpcMax(st))
+	}
+}
+
+func (b *Bridge) writeLPC(e spineapi.EntityRemoteInterface, value float64, active bool) {
+	limit := ucapi.LoadLimit{Value: value, IsActive: active}
+	_, err := b.lpc.WriteConsumptionLimit(e, limit, func(res model.ResultDataType) {
+		if res.ErrorNumber != nil && *res.ErrorNumber != model.ErrorNumberTypeNoError {
+			desc := ""
+			if res.Description != nil {
+				desc = string(*res.Description)
+			}
+			log.Printf("Device rejected power limit %s W (active: %v): error %d %s", formatValue(value), active, *res.ErrorNumber, desc)
+		}
+		b.refreshLPC()
+	})
+	if err != nil {
+		log.Printf("Writing power limit failed: %v", err)
+	}
+}
+
+// SetLPCLimit is called from MQTT when the number entity changes.
+func (b *Bridge) SetLPCLimit(value float64) {
+	e := b.lpcEntity()
+	if e == nil {
+		log.Printf("Power limit not available (yet)")
+		return
+	}
+	b.mu.Lock()
+	st := b.lpcState
+	b.mu.Unlock()
+	value = math.Max(0, math.Min(value, b.lpcMax(st)))
+	log.Printf("Power limit set to %s W (active: %v)", formatValue(value), st.Active)
+	b.writeLPC(e, value, st.Active)
+}
+
+// SetLPCActive is called from MQTT when the switch changes.
+func (b *Bridge) SetLPCActive(on bool) {
+	e := b.lpcEntity()
+	if e == nil {
+		log.Printf("Power limit not available (yet)")
+		return
+	}
+	b.mu.Lock()
+	st := b.lpcState
+	if on && b.cfg.PowerLimitMaxMinutes > 0 {
+		b.lpcState.Expires = time.Now().Add(time.Duration(b.cfg.PowerLimitMaxMinutes) * time.Minute)
+	} else {
+		b.lpcState.Expires = time.Time{}
+	}
+	expires := b.lpcState.Expires
+	b.mu.Unlock()
+
+	if on {
+		msg := "no automatic end"
+		if !expires.IsZero() {
+			msg = "ends automatically at " + expires.Local().Format("15:04")
+		}
+		log.Printf("Power limit ON at %s W (%s)", formatValue(st.Limit), msg)
+	} else {
+		log.Printf("Power limit OFF")
+	}
+	b.writeLPC(e, st.Limit, on)
+}
+
+// checkLPCExpiry switches an expired limit off. Called from the main loop.
+func (b *Bridge) checkLPCExpiry(now time.Time) {
+	b.mu.Lock()
+	st := b.lpcState
+	b.mu.Unlock()
+	if st.Active && !st.Expires.IsZero() && now.After(st.Expires) {
+		log.Printf("Power limit reached its maximum duration of %d minutes, switching it off", b.cfg.PowerLimitMaxMinutes)
+		b.SetLPCActive(false)
+	}
+}

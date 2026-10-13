@@ -24,6 +24,12 @@ configuration:
     description: >-
       A value that has not been refreshed for this long becomes unavailable
       instead of silently showing an old number. At least two poll intervals.
+  power_limit_max_minutes:
+    name: Power limit maximum duration (minutes)
+    description: >-
+      A power limit that is switched on ends by itself after this many
+      minutes, so a forgotten automation cannot keep the heat pump throttled.
+      0 = never.
   port:
     name: EEBUS port
     description: TCP port for incoming EEBUS (SHIP) connections.

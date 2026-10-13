@@ -22,7 +22,8 @@ was a great help.
 | | |
 |---|---|
 | Read power and temperatures | ✅ 0.1.0 |
-| Hot water boost, power limit (LPC) | planned |
+| Power limit (LPC) | 🧪 0.2.0, being tested |
+| Hot water boost | planned |
 | Setpoints and operating modes | planned |
 
 Tested with: Vaillant aroTHERM plus + VR940. Reports for other devices are

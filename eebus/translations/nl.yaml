@@ -25,6 +25,12 @@ configuration:
     description: >-
       Een waarde die zo lang niet ververst is, wordt onbeschikbaar in plaats
       van stil een oud getal te tonen. Minimaal twee poll-intervallen.
+  power_limit_max_minutes:
+    name: Maximale duur vermogensbegrenzing (minuten)
+    description: >-
+      Een ingeschakelde begrenzing vervalt vanzelf na zoveel minuten, zodat
+      een vergeten automatisering de warmtepomp niet blijvend afknijpt.
+      0 = nooit.
   port:
     name: EEBUS-poort
     description: TCP-poort voor inkomende EEBUS-verbindingen (SHIP).

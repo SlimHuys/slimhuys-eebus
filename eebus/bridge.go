@@ -11,6 +11,7 @@ import (
 	"github.com/enbility/eebus-go/api"
 	"github.com/enbility/eebus-go/features/client"
 	"github.com/enbility/eebus-go/service"
+	eglpc "github.com/enbility/eebus-go/usecases/eg/lpc"
 	shipapi "github.com/enbility/ship-go/api"
 	spineapi "github.com/enbility/spine-go/api"
 	"github.com/enbility/spine-go/model"
@@ -50,6 +51,9 @@ type Bridge struct {
 	lastPoll      time.Time
 	reconnects    int
 	lastRejectLog time.Time
+	lpc           *eglpc.LPC
+	lpcState      LPCState
+	lpcChecked    bool
 	// counters for the hourly "still alive" log line
 	statValues, statPushed int
 	statSince              time.Time
@@ -96,7 +100,7 @@ func (b *Bridge) useSKI(ski string) {
 	if c, ok := b.candidates[ski]; ok {
 		b.device.Brand, b.device.Model, b.device.Name = c.Brand, c.Model, c.Name
 	}
-	b.pub = NewPublisher(b.cfg, b.device)
+	b.pub = NewPublisher(b.cfg, b.device, b)
 	pub := b.pub
 	b.mu.Unlock()
 
@@ -315,6 +319,7 @@ func (b *Bridge) loop() {
 		if !connected {
 			continue
 		}
+		b.checkLPCExpiry(now)
 
 		if sincePoll >= b.cfg.pollInterval() || (!gotData && sincePoll >= initialPollEvery) {
 			b.poll()
@@ -347,6 +352,7 @@ func (b *Bridge) RemoteSKIConnected(_ api.ServiceInterface, ski string) {
 	b.connected = true
 	b.connectedAt = time.Now()
 	b.lastPoll = time.Time{}
+	b.lpcChecked = false
 	pub := b.pub
 	b.mu.Unlock()
 	if pub != nil {

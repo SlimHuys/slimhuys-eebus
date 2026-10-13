@@ -28,6 +28,10 @@ type Config struct {
 	StaleAfter      int    `json:"stale_after"`
 	Debug           bool   `json:"debug"`
 
+	// A switched-on power limit ends by itself after this many minutes;
+	// 0 = never. Protects against a forgotten automation.
+	PowerLimitMaxMinutes int `json:"power_limit_max_minutes"`
+
 	DataDir string `json:"-"`
 }
 
@@ -41,7 +45,9 @@ func defaultConfig() Config {
 		TopicPrefix:     "slimhuys_eebus",
 		PollInterval:    300,
 		StaleAfter:      720,
-		DataDir:         "./data",
+
+		PowerLimitMaxMinutes: 240,
+		DataDir:              "./data",
 	}
 }
 

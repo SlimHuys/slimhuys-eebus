@@ -105,6 +105,7 @@ func main() {
 	// MPC adds the Measurement and ElectricalConnection client features to
 	// our CEM entity; subscriptions on other entities are done by the poller.
 	b.svc.AddUseCase(mpc.NewMPC(b.local, nil))
+	b.setupLPC(b.local)
 	if err := spine.Events.Subscribe(b); err != nil {
 		log.Fatalf("eebus events: %v", err)
 	}
