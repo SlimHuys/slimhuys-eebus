@@ -24,7 +24,7 @@ great help.
 | | |
 |---|---|
 | Read power and temperatures | ✅ 0.1.0 |
-| Power limit (LPC) | 🧪 0.3.6: the heat pump responds; the VR940 needs the limit re-sent every minute |
+| Power limit (LPC) | ✅ 0.3.6 (the add-on re-sends the limit; the VR940 drops it after a minute otherwise) |
 | Hot water mode and setpoint | ✅ 0.3.0 |
 | Hot water boost | 🧪 0.3.0, not yet tested |
 | Heating mode and room setpoint (climate) | ✅ 0.3.0 |

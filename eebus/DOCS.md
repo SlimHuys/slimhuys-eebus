@@ -72,7 +72,10 @@ Consumption*). The add-on adds:
 | Power limit ends (diagnostic) | When an active limit switches itself off. |
 
 The VR940 drops an active limit after about a minute unless it is sent
-again; the add-on re-sends it every 45 seconds while it is on.
+again; the add-on re-sends it every 45 seconds while it is on. Measured on an
+aroTHERM plus making hot water: 1452 W → limit 1000 W → 1077 W after a
+minute, 1004–1009 W for the rest of the ten minutes; after switching off it
+was back at 1462 W within two minutes.
 
 Safety:
 
