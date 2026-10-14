@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.3.5
+
+- Fix: the watchdog only looked at a connection while it existed and started
+  counting again on every reconnect. On a VR940 the data stopped at 01:18 and
+  the connection then flapped every minute for four hours without the
+  watchdog ever acting. It now measures the time without any value,
+  regardless of the connection: after `stale_after` one reconnect, and if
+  that brings nothing within 10 minutes the add-on exits so the Supervisor
+  starts a clean process (which is what brought the data back).
+- Turn on **Watchdog** on the add-on's Info tab so the Supervisor restarts it.
+
 ## 0.3.4
 
 - An invalid value now also clears the number in Home Assistant (payload

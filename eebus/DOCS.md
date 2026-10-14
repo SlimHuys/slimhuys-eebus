@@ -145,9 +145,13 @@ welcome.
 ## Never silently stale
 
 Each sensor has its own availability. If a value is not refreshed within
-`stale_after`, it turns *unavailable* instead of showing an old number. If no
-value at all arrives, the add-on reconnects; after three failed reconnects it
-exits so the Supervisor restarts it.
+`stale_after`, it turns *unavailable* instead of showing an old number.
+
+If no value at all arrives for `stale_after`, the add-on reconnects once. If
+that brings nothing within 10 minutes it exits, so the Supervisor starts a
+fresh process; on a VR940 that has always brought the data back, an
+in-process reconnect has not. **Turn on Watchdog on the add-on's Info tab**,
+otherwise the Supervisor leaves the add-on stopped.
 
 ## Troubleshooting
 
@@ -158,6 +162,11 @@ but never answered. With `debug: true` the log then shows our
 and on again in the myVAILLANT app (Settings → Network → EEBUS); the add-on
 reconnects by itself. Note that this also clears an active power limit in the
 device.
+
+**Values stop, the connection keeps flapping.** Seen at night on a VR940:
+the data stopped while the connection stayed up, then connect/disconnect
+every minute. Restarting the add-on fixed it; since 0.3.5 the add-on does
+that itself (with Watchdog on).
 
 **`rejected the connection`.** The add-on is not trusted yet, or another
 EEBUS manager is connected. Most devices accept only one.

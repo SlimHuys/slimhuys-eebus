@@ -23,9 +23,9 @@ const (
 	initialPollEvery = 15 * time.Second
 	tickEvery        = 15 * time.Second
 	statsEvery       = time.Hour
-	// How often a stale connection is torn down before the process gives up
-	// and lets the Supervisor restart it.
-	maxReconnects = 3
+	// After the one in-process reconnect, wait this long for data before
+	// exiting so the Supervisor restarts the add-on.
+	exitAfterReconnect = 10 * time.Minute
 )
 
 type pendingValue struct {
@@ -49,7 +49,8 @@ type Bridge struct {
 	connectedAt      time.Time
 	lastData         time.Time
 	lastPoll         time.Time
-	reconnects       int
+	reconnectTried   bool
+	started          time.Time
 	lastRejectLog    time.Time
 	lpc              *eglpc.LPC
 	lpcState         LPCState
@@ -75,6 +76,7 @@ type Bridge struct {
 func NewBridge(cfg Config) *Bridge {
 	return &Bridge{
 		cfg:        cfg,
+		started:    time.Now(),
 		ski:        cfg.DeviceSKI,
 		device:     DeviceInfo{SKI: cfg.DeviceSKI},
 		descs:      map[string]Description{},
@@ -254,7 +256,7 @@ func (b *Bridge) updateLocked(e spineapi.EntityRemoteInterface, addr string, id 
 	m.Source = pv.source
 	m.Updated = pv.at
 	b.lastData = pv.at
-	b.reconnects = 0
+	b.reconnectTried = false
 	b.statValues++
 	if pv.source == "notify" {
 		b.statPushed++
@@ -314,10 +316,16 @@ func (b *Bridge) loop() {
 		connected := b.connected
 		gotData := !b.lastData.IsZero() && b.lastData.After(b.connectedAt)
 		sincePoll := now.Sub(b.lastPoll)
-		staleFor := now.Sub(b.lastData)
-		if !gotData {
-			staleFor = now.Sub(b.connectedAt)
+		// Time without any value, whatever the connection does. On 14
+		// October 2026 the VR940 stopped sending at 01:18 and the connection
+		// then flapped every minute for four hours; measuring per connection
+		// restarted the clock each time, so the watchdog never acted.
+		since := b.lastData
+		if since.IsZero() || since.Before(b.started) {
+			since = b.started
 		}
+		noData := now.Sub(since)
+		reconnectTried := b.reconnectTried
 		pub := b.pub
 		var stats string
 		if b.statSince.IsZero() {
@@ -336,6 +344,23 @@ func (b *Bridge) loop() {
 		if pub != nil {
 			pub.Refresh(now, b.cfg.staleAfter())
 		}
+
+		// Watchdog. A fresh process has always brought the VR940 back; an
+		// in-process reconnect has not. So: one reconnect, then exit and
+		// let the Supervisor start a clean process.
+		switch {
+		case noData > b.cfg.staleAfter()+exitAfterReconnect:
+			log.Printf("No data for %s despite a reconnect; exiting so the Supervisor restarts the add-on", noData.Round(time.Second))
+			os.Exit(1)
+		case noData > b.cfg.staleAfter() && !reconnectTried:
+			b.mu.Lock()
+			b.reconnectTried = true
+			b.mu.Unlock()
+			log.Printf("No data for %s, reconnecting", noData.Round(time.Second))
+			b.svc.DisconnectService(b.identity(), "stale data")
+			continue
+		}
+
 		if !connected {
 			continue
 		}
@@ -344,20 +369,6 @@ func (b *Bridge) loop() {
 
 		if sincePoll >= b.cfg.pollInterval() || (!gotData && sincePoll >= initialPollEvery) {
 			b.poll()
-		}
-
-		if staleFor > b.cfg.staleAfter() {
-			b.mu.Lock()
-			b.reconnects++
-			n := b.reconnects
-			b.connectedAt = now
-			b.mu.Unlock()
-			if n > maxReconnects {
-				log.Printf("No data after %d reconnects, exiting so the Supervisor restarts the add-on", maxReconnects)
-				os.Exit(1)
-			}
-			log.Printf("No data for %s, reconnecting (attempt %d/%d)", staleFor.Round(time.Second), n, maxReconnects)
-			b.svc.DisconnectService(b.identity(), "stale data")
 		}
 	}
 }
