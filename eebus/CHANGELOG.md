@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.3.6
+
+- Power limit: the VR940 drops an active limit by itself after about 60
+  seconds (live test: on at 08:40:22, off at 08:41:23, while the heat pump had
+  already gone from 1484 to 1192 W). The add-on now re-sends an active limit
+  every 45 seconds and re-applies it if the device drops it anyway; after
+  five drops in a row it gives up and logs why. When the limit ends is now
+  tracked by the add-on itself, so a drop no longer loses it.
+- Grid data is sent at most every 30 seconds and only on a change of 50 W or
+  more (otherwise every 5 minutes). Sending every 5 seconds coincided with
+  the VR940's EEBUS side degrading and refusing sessions; with grid data off
+  it stayed healthy (96 values per hour instead of 14).
+
 ## 0.3.5
 
 - Fix: the watchdog only looked at a connection while it existed and started

@@ -58,6 +58,10 @@ type Bridge struct {
 	lpcLimitSet      bool    // the limit value was set from Home Assistant in this run
 	lpcWant          float64 // last limit value asked for from Home Assistant
 	lpcLeftoverDone  bool
+	lpcWantActive    bool      // the user switched the limit on
+	lpcWantUntil     time.Time // when that ends by itself
+	lpcLastWrite     time.Time
+	lpcDrops         int
 	lpcLeftoverTries int
 	hvac             *hvac
 	hvacSummary      string
@@ -365,6 +369,7 @@ func (b *Bridge) loop() {
 			continue
 		}
 		b.checkLPCExpiry(now)
+		b.keepLPC(now)
 		b.fixLPCLeftover()
 
 		if sincePoll >= b.cfg.pollInterval() || (!gotData && sincePoll >= initialPollEvery) {

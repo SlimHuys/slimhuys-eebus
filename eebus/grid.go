@@ -14,6 +14,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"math"
 	"net/http"
 	"os"
 	"strconv"
@@ -28,7 +29,14 @@ import (
 	"github.com/enbility/spine-go/util"
 )
 
-const gridEvery = 5 * time.Second
+// Sending every 5 s (0.3.0–0.3.5) coincided with the VR940's EEBUS side
+// slowly degrading and then refusing sessions; with grid data off it stayed
+// healthy. Send rarely and only on a real change.
+const (
+	gridEvery    = 30 * time.Second
+	gridMinDelta = 50.0            // W
+	gridMaxQuiet = 5 * time.Minute // send at least this often
+)
 
 // haReader reads entity states from Home Assistant: through the Supervisor
 // proxy inside the add-on, or HA_URL/HA_TOKEN when running locally.
@@ -136,6 +144,7 @@ func (b *Bridge) gridLoop() {
 	t := time.NewTicker(gridEvery)
 	defer t.Stop()
 	failing := false
+	lastPower, lastSent := math.Inf(1), time.Time{}
 	for range t.C {
 		power, err := b.grid.ha.value(b.cfg.GridPowerEntity)
 		if err != nil {
@@ -151,6 +160,10 @@ func (b *Bridge) gridLoop() {
 		}
 
 		now := time.Now()
+		if math.Abs(power-lastPower) < gridMinDelta && now.Sub(lastSent) < gridMaxQuiet {
+			continue
+		}
+		lastPower, lastSent = power, now
 		u := b.grid.uc
 		updates := []ucapi.UpdateData{u.UpdateDataPowerTotal(power, &now, nil)}
 		if e := b.cfg.GridEnergyConsumedEntity; e != "" {

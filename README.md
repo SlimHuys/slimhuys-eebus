@@ -24,11 +24,11 @@ great help.
 | | |
 |---|---|
 | Read power and temperatures | ✅ 0.1.0 |
-| Power limit (LPC) | 🧪 0.2.0, being tested |
+| Power limit (LPC) | 🧪 0.3.6: the heat pump responds; the VR940 needs the limit re-sent every minute |
 | Hot water mode and setpoint | ✅ 0.3.0 |
 | Hot water boost | 🧪 0.3.0, not yet tested |
 | Heating mode and room setpoint (climate) | ✅ 0.3.0 |
-| Grid data for Vaillant energy management (MGCP) | 🧪 0.3.0, experimental |
+| Grid data for Vaillant energy management (MGCP) | ⚠️ experimental, not recommended on a VR940 |
 
 Tested with: Vaillant aroTHERM plus + VR940. Reports for other devices are
 welcome as an issue (include the add-on log with `debug: true`).

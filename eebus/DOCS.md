@@ -71,6 +71,9 @@ Consumption*). The add-on adds:
 | Failsafe power limit (diagnostic) | What the device falls back to when the add-on stops sending heartbeats. |
 | Power limit ends (diagnostic) | When an active limit switches itself off. |
 
+The VR940 drops an active limit after about a minute unless it is sent
+again; the add-on re-sends it every 45 seconds while it is on.
+
 Safety:
 
 - An active limit switches off by itself after `power_limit_max_minutes`.
@@ -134,7 +137,7 @@ automation:
 Vaillant heat pumps can charge the hot water and buffer cylinders with solar
 surplus when an energy manager tells them the grid power. Set
 `grid_power_entity` to your grid meter's power sensor (positive = taking from
-the grid, negative = feeding in) and the add-on offers it every 5 seconds.
+the grid, negative = feeding in) and the add-on offers it.
 The diagnostic sensor *Grid power sent to device* shows what was sent.
 
 In the myVAILLANT app, trust this add-on under Network → EEBUS and switch on

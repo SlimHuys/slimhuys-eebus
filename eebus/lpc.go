@@ -115,6 +115,8 @@ func (b *Bridge) refreshLPC() {
 	switch {
 	case !st.Active:
 		st.Expires = time.Time{}
+	case b.lpcWantActive:
+		st.Expires = b.lpcWantUntil
 	case b.lpcState.Expires.IsZero() && b.cfg.PowerLimitMaxMinutes > 0:
 		// Active limit we did not set in this run (e.g. after a restart):
 		// give it the same maximum duration, so it can never stick forever.
@@ -150,6 +152,9 @@ func (b *Bridge) publishLPC(st LPCState) {
 }
 
 func (b *Bridge) writeLPC(e spineapi.EntityRemoteInterface, value float64, active bool) {
+	b.mu.Lock()
+	b.lpcLastWrite = time.Now()
+	b.mu.Unlock()
 	limit := ucapi.LoadLimit{Value: value, IsActive: active}
 	_, err := b.lpc.WriteConsumptionLimit(e, limit, func(res model.ResultDataType, _ model.MsgCounterType) {
 		if res.ErrorNumber != nil && *res.ErrorNumber != model.ErrorNumberTypeNoError {
@@ -222,12 +227,14 @@ func (b *Bridge) SetLPCActive(on bool) {
 		b.publishLPC(st) // put the switch back to OFF in Home Assistant
 		return
 	}
+	b.lpcWantActive, b.lpcDrops = on, 0
 	if on && b.cfg.PowerLimitMaxMinutes > 0 {
-		b.lpcState.Expires = time.Now().Add(time.Duration(b.cfg.PowerLimitMaxMinutes) * time.Minute)
+		b.lpcWantUntil = time.Now().Add(time.Duration(b.cfg.PowerLimitMaxMinutes) * time.Minute)
 	} else {
-		b.lpcState.Expires = time.Time{}
+		b.lpcWantUntil = time.Time{}
 	}
-	expires := b.lpcState.Expires
+	b.lpcState.Expires = b.lpcWantUntil
+	expires := b.lpcWantUntil
 	b.mu.Unlock()
 
 	if on {
@@ -246,10 +253,69 @@ func (b *Bridge) SetLPCActive(on bool) {
 func (b *Bridge) checkLPCExpiry(now time.Time) {
 	b.mu.Lock()
 	st := b.lpcState
+	want, until := b.lpcWantActive, b.lpcWantUntil
 	b.mu.Unlock()
-	if st.Active && !st.Expires.IsZero() && now.After(st.Expires) {
+	ours := want && !until.IsZero() && now.After(until)
+	foreign := !want && st.Active && !st.Expires.IsZero() && now.After(st.Expires)
+	if ours || foreign {
 		log.Printf("Power limit reached its maximum duration of %d minutes, switching it off", b.cfg.PowerLimitMaxMinutes)
 		b.SetLPCActive(false)
+	}
+}
+
+const (
+	// The VR940 drops an active limit after about 60 seconds unless it is
+	// sent again (seen 14 October 2026: on at 08:40:22, off by itself at
+	// 08:41:23 while the add-on sent nothing). Re-send well within that.
+	lpcRefreshEvery = 45 * time.Second
+	// Re-apply after the device dropped the limit at most this often in a
+	// row; a device that keeps refusing should not be hammered.
+	lpcMaxDrops = 5
+)
+
+// keepLPC keeps a limit the user switched on actually active on the device.
+// Called from the main loop.
+func (b *Bridge) keepLPC(now time.Time) {
+	b.mu.Lock()
+	want := b.lpcWantActive
+	st := b.lpcState
+	since := now.Sub(b.lpcLastWrite)
+	limit := st.Limit
+	if b.lpcLimitSet {
+		limit = b.lpcWant
+	}
+	b.mu.Unlock()
+	if !want || !st.Supported {
+		return
+	}
+	e := b.lpcEntity()
+	if e == nil {
+		return
+	}
+	switch {
+	case !st.Active && since > 10*time.Second:
+		b.mu.Lock()
+		b.lpcDrops++
+		drops := b.lpcDrops
+		if drops > lpcMaxDrops {
+			b.lpcWantActive = false
+		}
+		b.mu.Unlock()
+		if drops > lpcMaxDrops {
+			log.Printf("The device keeps dropping the power limit; giving up after %d attempts", lpcMaxDrops)
+			b.refreshLPC()
+			return
+		}
+		log.Printf("The device dropped the active power limit; applying %s W again (%d/%d)", formatValue(limit), drops, lpcMaxDrops)
+		b.writeLPC(e, limit, true)
+	case st.Active && since >= lpcRefreshEvery:
+		b.mu.Lock()
+		b.lpcDrops = 0 // it held since the last write
+		b.mu.Unlock()
+		if b.cfg.Debug {
+			log.Printf("refreshing power limit %s W", formatValue(limit))
+		}
+		b.writeLPC(e, limit, true)
 	}
 }
 
